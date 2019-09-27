@@ -1,0 +1,24 @@
+---
+title: "Stream conductivity model"
+author: ""
+output: 
+  html_document
+self_contained: yes
+---
+
+```{r, message = F, warning = F, echo = F}
+library(tidyverse)
+library(readxl)
+library(quantregForest)
+library(knitr)
+library(here)
+
+opts_chunk$set(warning = FALSE, message = FALSE, dev.args = list(family = 'serif'), eval = T)
+```
+
+## Import data
+
+```{r}
+dat <- read_excel(here('data', 'Cnd9.xlsx'))
+```
+
