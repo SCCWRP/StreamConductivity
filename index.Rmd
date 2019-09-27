@@ -21,7 +21,7 @@ opts_chunk$set(warning = FALSE, message = FALSE, dev.args = list(family = 'serif
 
 ## Create models and check model performance
 
-Data were split 4:1 calibration/validation and five separate models were fit for each of five folds. A quantile regression forest model was fit for the median conductivity using the predictors in the `preds` object. The last model was saved as 
+Data were split 4:1 calibration/validation and five separate models were fit for each of five folds. A quantile regression forest model was fit for the median conductivity using the predictors in the `preds` object. The last model (fifth fold) was saved as `cond.qr50`. Back to [repo](https://github.com/SCCWRP/ASCI).
 
 ```{r}
 # import data
