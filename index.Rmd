@@ -2,23 +2,152 @@
 title: "Stream conductivity model"
 author: ""
 output: 
-  html_document
+  html_document:
+    css: kable.css
+    code_folding: hide
 self_contained: yes
 ---
 
-```{r, message = F, warning = F, echo = F}
+```{r, message = F, warning = F, echo = T}
 library(tidyverse)
 library(readxl)
 library(quantregForest)
 library(knitr)
 library(here)
+library(kableExtra)
 
 opts_chunk$set(warning = FALSE, message = FALSE, dev.args = list(family = 'serif'), eval = T)
 ```
 
-## Import data
+## Create models and check model performance
+
+Data were split 4:1 calibration/validation and five separate models were fit for each of five folds. A quantile regression forest model was fit for the median conductivity using the predictors in the `preds` object. The last model was saved as 
 
 ```{r}
+# import data
 dat <- read_excel(here('data', 'Cnd9.xlsx'))
+
+# predictors
+preds <- c("CaO_Mean", "MgO_Mean", "S_Mean", "UCS_Mean", "LPREM_mean",
+          "AtmCa", "AtmMg", "AtmSO4", "MINP_WS", "MEANP_WS", "SumAve_P",
+          "TMAX_WS", "XWD_WS", "MAXWD_WS", "LST32AVE", "BDH_AVE", "KFCT_AVE",
+          "PRMH_AVE")
+
+# subset predicts, remove NA, setup flds
+tomod <-  dat %>% 
+  select(c("SiteCode", "Cond_uS", preds)) %>% 
+  na.omit %>% 
+  mutate(folds = sample(1:5, nrow(.), replace = T)) 
+  
+# folds
+flds <- unique(tomod$folds) %>% sort
+
+# pre-allocated output
+out <- vector('list', length = length(flds))
+
+# loop through folds
+for(fld in flds){
+    
+  # cat(fld, '\t')
+  
+  # calibration data
+  calset <- tomod %>%
+    filter(!folds %in% fld)
+  
+  # validation data
+  valset <- tomod %>%
+    filter(folds %in% fld)
+    
+  # create model
+  mod <- quantregForest(calset[, preds], calset[, 'Cond_uS', drop = T], ntree = 500, keep.inbag = TRUE)
+    
+  # oob predictions for mod
+  calsetid <- calset %>%
+    mutate(id = 1:nrow(.)) %>%
+    dplyr::select(id)
+  prd <- predict(mod, what = 0.5) %>%
+    data.frame(prd = .) %>%
+    rownames_to_column('id') %>%
+    mutate(id = as.numeric(id)) %>%
+    left_join(calsetid, ., by = 'id') %>%
+    pull(prd)
+  
+  # calibration prediction
+  calpred <- tibble(
+    set = 'cal',
+    SiteCode = calset$SiteCode,
+    obs = calset$Cond_uS,
+    prd = prd
+  )
+  
+  # validation prediction, full and important
+  valpred <- tibble(
+    set = 'val',
+    SiteCode = valset$SiteCode,
+    obs = valset$Cond_uS,
+    prd = predict(mod, newdata = valset, what = 0.5)
+  )
+  
+  # combine cal, val, get summary stats
+  prds <- bind_rows(calpred, valpred) %>%
+    group_by(set) %>%
+    nest() %>%
+    mutate(
+      rmse = map(data, function(x) sqrt(mean(x$obs - x$prd, na.rm = T)^2)),
+      rsqr = map(data, function(x){
+        lm(obs ~ prd, data = x) %>%
+          summary %>%
+          .$r.squared
+      })
+    ) %>%
+    unnest(c(rmse, rsqr))
+  
+  # append to output
+  out[[fld]] <- prds
+  
+}
+
+# combine all results by fold
+fldprf <- out %>%
+  enframe('fld') %>%
+  unnest(value)
+
+save(fldprf, file = here('data', 'fldprf.RData'), compress = 'xz')
+
+# save last model
+cond.qrf <- mod
+save(cond.qrf, file = here('data', 'cond.qrf.RData'), version = 2, compress = 'xz')
 ```
+
+```{r, fig.height = 5, fig.width = 10}
+toplo <- fldprf %>% 
+  select(fld, set, data) %>% 
+  unnest(data)
+
+p <- ggplot(toplo, aes(x = prd, y = obs)) + 
+    geom_point() + 
+    facet_grid(set ~ fld) +
+    geom_abline(intercept = 0, slope = 1) +
+    geom_smooth(method = 'lm', se = F, linetype = 'dashed') + 
+    theme_bw(base_family = 'serif', base_size = 14) + 
+    xlab('Predicted') +
+    ylab('Observed') + 
+    theme(strip.background = element_blank())
+
+return(p)
+```
+
+```{r}
+totab <- fldprf %>% 
+    select(fld, set, rmse, rsqr) %>% 
+    gather('var', 'val', rmse, rsqr) %>% 
+    unite('var', set, var, sep = ' ') %>% 
+    mutate(val = round(val, 2)) %>% 
+    spread(var, val) %>% 
+    arrange(fld) 
+kable(totab, caption = 'Summary statistics.', format = 'html') %>% 
+    kable_styling(full_width = T, font_size = 14)
+```
+
+
 
